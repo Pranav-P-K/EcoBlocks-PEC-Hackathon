@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
@@ -9,6 +11,8 @@ interface BlockData {
   aqi: number;
   traffic: string;
   locationName: string;
+  lat: number;
+  lng: number;
 }
 
 interface SimResult {
@@ -50,7 +54,6 @@ const App: React.FC = () => {
       viewer.terrainProvider = terrainProvider;
     });
 
-
     // Proxy for OSM Tiles to bypass CORS
     const proxyImageryProvider = new Cesium.UrlTemplateImageryProvider({
       url: 'http://localhost:5000/api/proxy-tile/{z}/{x}/{y}',
@@ -63,7 +66,6 @@ const App: React.FC = () => {
       viewer.scene.primitives.add(tileset);
     });
 
-
     // Initial View: Bengaluru
     viewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(77.5946, 12.9716, 2000),
@@ -71,6 +73,22 @@ const App: React.FC = () => {
         pitch: Cesium.Math.toRadians(-35)
       }
     });
+
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    handler.setInputAction((click: any) => {
+      const pickedObject = viewer.scene.pick(click.position);
+      if (Cesium.defined(pickedObject) && pickedObject.primitive instanceof Cesium.Cesium3DTileset) {
+        // Get lat/lng of the click
+        const cartesian = viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid);
+        if (cartesian) {
+          const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+          const lat = Cesium.Math.toDegrees(cartographic.latitude);
+          const lng = Cesium.Math.toDegrees(cartographic.longitude);
+
+          fetchDataForCoords(lat, lng, "Selected Building Block");
+        }
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     cesiumViewer.current = viewer;
 
@@ -81,7 +99,44 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // 2. Handle Search & Fly To
+  const fetchDataForCoords = async (lat: number, lng: number, name: string) => {
+    setLoading(true);
+    try {
+      const res = await axios.get(`http://localhost:5000/api/block-data?lat=${lat}&lng=${lng}`);
+      setBlockData({ ...res.data, locationName: name });
+      drawAQIHeatmap(lat, lng, res.data.aqi);
+      setSimResult(null);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  const drawAQIHeatmap = (lat: number, lng: number, aqi: number) => {
+    const viewer = cesiumViewer.current;
+    if (!viewer) return;
+
+    const color =
+      aqi < 50
+        ? Cesium.Color.GREEN.withAlpha(0.4)
+        : aqi < 100
+          ? Cesium.Color.YELLOW.withAlpha(0.45)
+          : aqi < 150
+            ? Cesium.Color.ORANGE.withAlpha(0.5)
+            : Cesium.Color.RED.withAlpha(0.55);
+
+    viewer.entities.removeAll();
+
+    viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lng, lat),
+      ellipse: {
+        semiMajorAxis: 500,
+        semiMinorAxis: 500,
+        material: color,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+      }
+    });
+  };
+
+  // Handle Search & Fly To
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery || !cesiumViewer.current) return;
@@ -113,8 +168,9 @@ const App: React.FC = () => {
     }
   };
 
-  // 3. Run Carbon Simulation
+  // Run Carbon Simulation
   const runSimulation = async (intervention: string) => {
+    if (!blockData) return;
     setLoading(true);
     try {
       const res = await axios.post('http://localhost:5000/api/simulate', {
@@ -123,10 +179,32 @@ const App: React.FC = () => {
         currentAQI: blockData ? blockData.aqi : 150
       });
       setSimResult(res.data);
+      animateInterventionEffect(blockData.lat, blockData.lng);
     } catch (err) {
       console.error("Simulation error", err);
     }
     setLoading(false);
+  };
+
+  const animateInterventionEffect = (lat: number, lng: number) => {
+    const viewer = cesiumViewer.current;
+    if (!viewer) return;
+
+    const entity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lng, lat),
+      ellipse: {
+        semiMajorAxis: new Cesium.CallbackProperty((_time) => {
+          return 300 + (Math.sin(Date.now() / 400) + 1) * 200;
+        }, false),
+        semiMinorAxis: new Cesium.CallbackProperty((_time) => {
+          return 300 + (Math.sin(Date.now() / 400) + 1) * 200;
+        }, false),
+        material: Cesium.Color.CYAN.withAlpha(0.35),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+      }
+    });
+
+    setTimeout(() => viewer.entities.remove(entity), 5000);
   };
 
   return (
