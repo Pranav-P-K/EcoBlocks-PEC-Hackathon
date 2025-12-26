@@ -31,23 +31,36 @@ const ELEVEN_LABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
 const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE;
 
-// const SOLANA_MINT_ADDRESS = process.env.SOLANA_MINT_ADDRESS;
-// const SOLANA_PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY;
+const SOLANA_MINT_ADDRESS = process.env.SOLANA_MINT_ADDRESS;
+const SOLANA_PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY;
 
 /* ─────────────────── CLIENTS ─────────────────── */
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 
-// const connection = new Connection(
-//   "https://api.devnet.solana.com",
-//   "confirmed"
-// );
+// Initialize Solana Connection
+// NOTE: Ensure SOLANA_PRIVATE_KEY is a valid JSON array string in .env
+const connection = new Connection(
+  "https://api.devnet.solana.com",
+  "confirmed"
+);
 
-// const mintKeypair = Keypair.fromSecretKey(
-//   Uint8Array.from(JSON.parse(SOLANA_PRIVATE_KEY))
-// );
-// const MINT = new PublicKey(SOLANA_MINT_ADDRESS);
+let mintKeypair;
+let MINT;
+
+try {
+  if (SOLANA_PRIVATE_KEY && SOLANA_MINT_ADDRESS) {
+    mintKeypair = Keypair.fromSecretKey(
+      Uint8Array.from(JSON.parse(SOLANA_PRIVATE_KEY))
+    );
+    MINT = new PublicKey(SOLANA_MINT_ADDRESS);
+  } else {
+    console.warn("⚠️ Solana credentials missing. Minting will fail.");
+  }
+} catch (err) {
+  console.error("❌ Failed to initialize Solana keys:", err.message);
+}
 
 /* ─────────────────── AUTH MIDDLEWARE ─────────────────── */
 
@@ -164,57 +177,69 @@ app.get("/api/geocode", async (req, res) => {
   }
 });
 
-
-
-
 /* ─────────────────── 3. SIMULATION ─────────────────── */
 
 app.post('/api/simulate', async (req, res) => {
-  const { blockId, intervention, currentAQI, userId } = req.body;
+  try {
+    const { blockId, intervention, currentAQI, userId } = req.body;
 
-  const strategies = {
-    "Green Wall": { r: 0.15, cost: 12000 },
-    "Algae Panel": { r: 0.25, cost: 25000 },
-    "Direct Air Capture": { r: 0.45, cost: 80000 }
-  };
+    const strategies = {
+      "Green Wall": { r: 0.15, cost: 12000 },
+      "Algae Panel": { r: 0.25, cost: 25000 },
+      "Direct Air Capture": { r: 0.45, cost: 80000 }
+    };
 
-  const s = strategies[intervention] || strategies["Green Wall"];
-  const reduced = +(currentAQI * s.r).toFixed(1);
-  const newAQI = +(currentAQI - reduced).toFixed(1);
-  const credits = Math.floor(reduced * 10);
+    const s = strategies[intervention] || strategies["Green Wall"];
+    const reduced = +(currentAQI * s.r).toFixed(1);
+    const newAQI = +(currentAQI - reduced).toFixed(1);
+    const credits = Math.floor(reduced * 10);
 
-  let aiInsight = "Urban air quality improved significantly.";
-  if (GEMINI_KEY) {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent(
-      `Write a professional one-line headline about ${intervention} reducing pollution.`
-    );
-    aiInsight = result.response.text();
-  }
-
-  let audioBase64 = null;
-  if (ELEVEN_LABS_KEY) {
-    const voice = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}`,
-      { text: aiInsight },
-      {
-        headers: { 'xi-api-key': ELEVEN_LABS_KEY },
-        responseType: 'arraybuffer'
+    let aiInsight = "Urban air quality improved significantly.";
+    
+    // Wrap external API calls in try-catch to prevent crash if quotas exceeded
+    try {
+      if (GEMINI_KEY) {
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const result = await model.generateContent(
+          `Write a professional one-line headline about ${intervention} reducing pollution.`
+        );
+        aiInsight = result.response.text();
       }
-    );
-    audioBase64 = Buffer.from(voice.data).toString('base64');
+    } catch (e) {
+      console.error("Gemini API Error:", e.message);
+    }
+
+    let audioBase64 = null;
+    try {
+      if (ELEVEN_LABS_KEY) {
+        const voice = await axios.post(
+          `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}`,
+          { text: aiInsight },
+          {
+            headers: { 'xi-api-key': ELEVEN_LABS_KEY },
+            responseType: 'arraybuffer'
+          }
+        );
+        audioBase64 = Buffer.from(voice.data).toString('base64');
+      }
+    } catch (e) {
+      console.error("ElevenLabs API Error:", e.message);
+    }
+
+    await supabase.from('simulations').insert({
+      user_id: userId || 'guest',
+      block_id: blockId,
+      intervention_type: intervention,
+      co2_reduced: reduced,
+      credits_earned: credits,
+      ai_insight: aiInsight
+    });
+
+    res.json({ newAQI, reductionAmount: reduced, credits, aiInsight, audioBase64 });
+  } catch (error) {
+    console.error("Simulation Error:", error);
+    res.status(500).json({ error: "Simulation failed" });
   }
-
-  await supabase.from('simulations').insert({
-    user_id: userId || 'guest',
-    block_id: blockId,
-    intervention_type: intervention,
-    co2_reduced: reduced,
-    credits_earned: credits,
-    ai_insight: aiInsight
-  });
-
-  res.json({ newAQI, reductionAmount: reduced, credits, aiInsight, audioBase64 });
 });
 
 /* ─────────────────── 4. HISTORY ─────────────────── */
@@ -238,7 +263,22 @@ app.post('/api/mint-credit', requireAuth, async (req, res) => {
   const { walletAddress, credits } = req.body;
   const userId = req.user.sub;
 
+  // Basic Validation
+  if (!credits || typeof credits !== 'number' || credits <= 0) {
+    return res.status(400).json({ error: "Invalid credit amount" });
+  }
+  if (!walletAddress) {
+    return res.status(400).json({ error: "Missing wallet address" });
+  }
+  
+  // NOTE: In a production environment, you must verify 'credits' against the DB
+  // e.g., SELECT sum(credits_earned) FROM simulations WHERE user_id = userId AND minted = false
+
   try {
+    if (!mintKeypair || !MINT) {
+      throw new Error("Solana configuration missing on server");
+    }
+
     const tokenAccount =
       await getOrCreateAssociatedTokenAccount(
         connection,
@@ -265,8 +305,8 @@ app.post('/api/mint-credit', requireAuth, async (req, res) => {
 
     res.json({ success: true, txHash: tx });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Mint failed" });
+    console.error("Mint failed:", e);
+    res.status(500).json({ error: "Mint failed: " + e.message });
   }
 });
 

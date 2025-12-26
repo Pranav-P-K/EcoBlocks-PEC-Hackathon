@@ -9,7 +9,7 @@ export function dacParticles(
 
   return viewer.scene.primitives.add(
     new Cesium.ParticleSystem({
-      image: "/particles/co2.png",
+      image: "/co2.png",
       startColor: Cesium.Color.GRAY.withAlpha(0.8),
       endColor: Cesium.Color.TRANSPARENT,
       minimumParticleLife: 1,

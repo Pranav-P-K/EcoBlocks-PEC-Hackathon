@@ -9,7 +9,7 @@ export function algaeParticles(
 
   return viewer.scene.primitives.add(
     new Cesium.ParticleSystem({
-      image: "/particles/o2.png",
+      image: "/o2.png",
       startColor: Cesium.Color.LIME.withAlpha(0.8),
       endColor: Cesium.Color.CYAN.withAlpha(0.2),
       minimumParticleLife: 3,

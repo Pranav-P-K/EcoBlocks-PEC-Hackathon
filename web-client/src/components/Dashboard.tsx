@@ -13,45 +13,70 @@ interface Props {
 }
 
 const getAQIColor = (aqi: number) => {
-  if (aqi <= 50) return '#4CAF50'; // Good
-  if (aqi <= 100) return '#FFC107'; // Moderate
-  if (aqi <= 150) return '#FF9800'; // Unhealthy for Sensitive Groups
-  if (aqi <= 200) return '#F44336'; // Unhealthy
-  if (aqi <= 300) return '#9C27B0'; // Very Unhealthy
-  return '#673AB7'; // Hazardous
+  if (aqi <= 50) return '#4CAF50';
+  if (aqi <= 100) return '#FFC107';
+  if (aqi <= 150) return '#FF9800';
+  if (aqi <= 200) return '#F44336';
+  if (aqi <= 300) return '#9C27B0';
+  return '#673AB7';
 };
 
 export const Dashboard: React.FC<Props> = ({ aqi, traffic, intervention, result }) => {
+  // If no data, don't render anything (keeps UI clean)
+  if (!aqi && !result) return null;
+
   return (
     <div className="dashboard">
-      <h3>🌱 Urban Conditions</h3>
+      {!result && <h3>🌱 Urban Conditions</h3>}
 
-      {aqi && (
-        <div className="aqi-display" style={{ 
+      {aqi && !result && (
+        <div className="aqi-badge" style={{ 
           background: `linear-gradient(135deg, ${getAQIColor(aqi)}20, ${getAQIColor(aqi)}40)`,
-          padding: 'var(--spacing-sm)',
-          borderRadius: 'var(--border-radius)',
-          marginBottom: 'var(--spacing-sm)'
+          border: `1px solid ${getAQIColor(aqi)}`
         }}>
-          <p>🌫️ Air Quality Index: <strong>{aqi}</strong></p>
-          <p>🚦 Traffic: <strong>{traffic}</strong></p>
+          <div className="stat-row">
+            <span>Air Quality</span>
+            <strong>{aqi} US AQI</strong>
+          </div>
+          <div className="stat-row">
+            <span>Traffic</span>
+            <strong>{traffic}</strong>
+          </div>
           <div style={{
-            height: '8px',
+            height: '6px',
             background: `linear-gradient(90deg, #4CAF50, ${getAQIColor(aqi)})`,
             borderRadius: '4px',
-            marginTop: 'var(--spacing-xs)'
+            marginTop: '8px'
           }} />
         </div>
       )}
 
       {result && (
         <div className="simulation-results">
-          <h4>🌍 Impact Summary</h4>
-          <p>🏗️ Intervention: <strong>{intervention}</strong></p>
-          <p>📉 New AQI: <strong style={{ color: getAQIColor(result.newAQI) }}>{result.newAQI}</strong></p>
-          <p>🌱 CO₂ Reduced: <strong>{result.reductionAmount.toFixed(2)} tons</strong></p>
-          <p>💎 Credits Earned: <strong>{result.credits}</strong></p>
-          <blockquote>💡 {result.aiInsight}</blockquote>
+          <h3 style={{marginBottom: '10px'}}>🌍 Impact Summary</h3>
+          <div className="stat-row">
+            <span>Intervention</span>
+            <strong>{intervention}</strong>
+          </div>
+          <div className="stat-row">
+            <span>New AQI</span>
+            <strong style={{ color: getAQIColor(result.newAQI) }}>{result.newAQI}</strong>
+          </div>
+          <div className="stat-row">
+            <span>CO₂ Reduced</span>
+            <strong>{result.reductionAmount.toFixed(1)} tons</strong>
+          </div>
+          <blockquote style={{
+            fontSize: '0.8rem',
+            fontStyle: 'italic',
+            background: '#f1f8e9',
+            padding: '8px',
+            borderRadius: '6px',
+            marginTop: '8px',
+            borderLeft: '3px solid var(--primary)'
+          }}>
+            {result.aiInsight}
+          </blockquote>
         </div>
       )}
     </div>

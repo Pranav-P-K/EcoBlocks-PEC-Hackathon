@@ -27,10 +27,15 @@ import { Toaster } from 'react-hot-toast';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN;
 
+// API Base URL from env or default
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
+
 const App: React.FC = () => {
   /* ───────────── REFS ───────────── */
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewer = useRef<Cesium.Viewer | null>(null);
+  // Ref to track the currently active particle system primitive
+  const particleSystemRef = useRef<any>(null);
 
   /* ───────────── GLOBAL STATE ───────────── */
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
@@ -56,10 +61,10 @@ const App: React.FC = () => {
     );
 
     handler.setInputAction((click: { position: Cesium.Cartesian2; }) => {
-      const cartesian = viewer.current!.camera.pickEllipsoid(
-        click.position,
-        viewer.current!.scene.globe.ellipsoid
-      );
+      // FIX: Use pickPosition for terrain awareness instead of pickEllipsoid
+      // This ensures we get the coordinate on the terrain surface (mountains/hills)
+      // rather than the smooth sphere underground.
+      const cartesian = viewer.current!.scene.pickPosition(click.position);
 
       if (!cartesian) return;
 
@@ -102,8 +107,9 @@ const App: React.FC = () => {
   const handleCitySearch = async (city: string) => {
     if (!viewer.current) return;
 
+    // FIX: Use env variable for API base instead of hardcoded localhost
     const res = await fetch(
-      `http://localhost:5000/api/geocode?q=${encodeURIComponent(city)}`
+      `${API_BASE}/geocode?q=${encodeURIComponent(city)}`
     );
     const data = await res.json();
 
@@ -126,28 +132,39 @@ const App: React.FC = () => {
     /* Switch to Street-Level Mode */
     enterStreetMode(viewer.current, coords.lat, coords.lon);
 
-    /* Launch Correct Particle System */
+    /* FIX: Remove existing particle system if present to prevent leaks */
+    if (particleSystemRef.current) {
+      viewer.current.scene.primitives.remove(particleSystemRef.current);
+      particleSystemRef.current = null;
+    }
+
+    /* Launch Correct Particle System and store ref */
     if (selectedIntervention === "Green Wall") {
-      greenWallParticles(viewer.current, coords.lat, coords.lon);
+      particleSystemRef.current = greenWallParticles(viewer.current, coords.lat, coords.lon);
     }
 
     if (selectedIntervention === "Algae Panel") {
-      algaeParticles(viewer.current, coords.lat, coords.lon);
+      particleSystemRef.current = algaeParticles(viewer.current, coords.lat, coords.lon);
     }
 
     if (selectedIntervention === "Direct Air Capture") {
-      dacParticles(viewer.current, coords.lat, coords.lon);
+      particleSystemRef.current = dacParticles(viewer.current, coords.lat, coords.lon);
     }
 
     /* Backend Simulation */
-    const result = await runSimulation({
-      blockId: 1,
-      intervention: selectedIntervention,
-      currentAQI: aqi,
-    });
+    try {
+      const result = await runSimulation({
+        blockId: 1,
+        intervention: selectedIntervention,
+        currentAQI: aqi,
+      });
 
-    setSimulationResult(result);
-    setCredits((prev) => prev + result.credits);
+      setSimulationResult(result);
+      setCredits((prev) => prev + result.credits);
+    } catch (error) {
+      console.error("Simulation failed:", error);
+      // Optional: Add toast error here
+    }
   };
 
   /* ───────────── RENDER ───────────── */
