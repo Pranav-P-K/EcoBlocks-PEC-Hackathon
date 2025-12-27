@@ -34,13 +34,17 @@ const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE;
 const SOLANA_MINT_ADDRESS = process.env.SOLANA_MINT_ADDRESS;
 const SOLANA_PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY;
 
+// API Keys
+const POSITIONSTACK_KEY = "a24792ebd5bd21c65ea087f2630dd027";
+const TOMTOM_KEY = "fXVNqCBEyaXJdtxAoU7surZO7T232MYC";
+const OSM_BUILDINGS_KEY = "59fcc2e8";
+
 /* ─────────────────── CLIENTS ─────────────────── */
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 
 // Initialize Solana Connection
-// NOTE: Ensure SOLANA_PRIVATE_KEY is a valid JSON array string in .env
 const connection = new Connection(
   "https://api.devnet.solana.com",
   "confirmed"
@@ -62,7 +66,7 @@ try {
   console.error("❌ Failed to initialize Solana keys:", err.message);
 }
 
-/* ─────────────────── AUTH MIDDLEWARE ─────────────────── */
+/* ─────────────────── HELPERS ─────────────────── */
 
 const jwks = jwksClient({
   jwksUri: `https://${AUTH0_DOMAIN}/.well-known/jwks.json`
@@ -94,45 +98,106 @@ function requireAuth(req, res, next) {
   );
 }
 
-/* ─────────────────── 1. BLOCK DATA ─────────────────── */
+// Tile Math Helpers for OSM
+const lon2tile = (lon, zoom) => (Math.floor((lon + 180) / 360 * Math.pow(2, zoom)));
+const lat2tile = (lat, zoom) => (Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom)));
+
+/* ─────────────────── 1. BLOCK DATA (AQI + TOMTOM + BUILDINGS) ─────────────────── */
 
 app.get('/api/block-data', async (req, res) => {
   const { lat, lon } = req.query;
   if (!lat || !lon) return res.status(400).json({ error: "Missing coordinates" });
 
   try {
-    const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,pm2_5`;
-    const { data } = await axios.get(url);
+    const latNum = parseFloat(lat);
+    const lonNum = parseFloat(lon);
 
-    const aqi = data.current.us_aqi;
-    const traffic =
-      aqi > 150 ? "Severe Congestion" :
-      aqi > 100 ? "Heavy Traffic" :
-      aqi > 50 ? "Moderate Flow" : "Clear Roads";
+    // 1. Fetch AQI
+    const aqiPromise = axios.get(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,pm2_5`);
+
+    // 2. Fetch Traffic (TomTom)
+    const trafficPromise = axios.get(`https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json`, {
+      params: { key: TOMTOM_KEY, point: `${lat},${lon}` }
+    });
+
+    // 3. Fetch Buildings (OSM Buildings Tile)
+    const z = 15;
+    const x = lon2tile(lonNum, z);
+    const y = lat2tile(latNum, z);
+    const buildingsPromise = axios.get(`https://a.data.osmbuildings.org/0.2/${OSM_BUILDINGS_KEY}/tile/${z}/${x}/${y}.json`, {
+      validateStatus: false
+    });
+
+    const [aqiRes, trafficRes, buildingsRes] = await Promise.allSettled([aqiPromise, trafficPromise, buildingsPromise]);
+
+    // -- Process AQI --
+    let aqi = 0;
+    let pm25 = 0;
+    if (aqiRes.status === 'fulfilled') {
+      aqi = aqiRes.value.data.current.us_aqi;
+      pm25 = aqiRes.value.data.current.pm2_5;
+    }
+
+    // -- Process Traffic --
+    let trafficLabel = "Clear Roads";
+    if (trafficRes.status === 'fulfilled' && trafficRes.value.data.flowSegmentData) {
+      const { currentSpeed, freeFlowSpeed } = trafficRes.value.data.flowSegmentData;
+      const ratio = currentSpeed / freeFlowSpeed;
+      if (ratio < 0.5) trafficLabel = `Severe Congestion (${currentSpeed} km/h)`;
+      else if (ratio < 0.75) trafficLabel = `Heavy Traffic (${currentSpeed} km/h)`;
+      else if (ratio < 0.9) trafficLabel = `Moderate Flow (${currentSpeed} km/h)`;
+      else trafficLabel = `Clear Flow (${currentSpeed} km/h)`;
+    } else {
+      trafficLabel = aqi > 100 ? "Heavy Traffic (Est)" : "Clear Roads (Est)";
+    }
+
+    // -- Process Buildings (Density & Type) --
+    let buildingCount = 0;
+    let areaType = "Unknown";
+    let densityLabel = "Low";
+
+    if (buildingsRes.status === 'fulfilled' && buildingsRes.value.status === 200) {
+      const geoJson = buildingsRes.value.data;
+      if (geoJson && geoJson.features) {
+        buildingCount = geoJson.features.length;
+
+        if (buildingCount > 100) {
+          densityLabel = "High";
+          areaType = "Urban Core";
+        } else if (buildingCount > 40) {
+          densityLabel = "Medium";
+          areaType = "Commercial/Residential";
+        } else if (buildingCount > 5) {
+          densityLabel = "Low";
+          areaType = "Suburban";
+        } else {
+          densityLabel = "Sparse";
+          areaType = "Rural/Open Space";
+        }
+      }
+    }
 
     res.json({
       aqi,
-      pm25: data.current.pm2_5,
-      traffic,
+      pm25,
+      traffic: trafficLabel,
+      buildingDensity: densityLabel,
+      buildingCount,
+      areaType,
       temperature: 28
     });
-  } catch {
-    res.status(500).json({ error: "Failed to fetch AQI" });
+  } catch (err) {
+    console.error("Block Data Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch environmental data" });
   }
 });
 
 /* ─────────────────── 2. TILE PROXY ─────────────────── */
-
 app.get('/api/proxy-tile/:z/:x/:y', async (req, res) => {
   const { z, x, y } = req.params;
   const url = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
-
   try {
-    const tile = await axios.get(url, {
-      responseType: 'arraybuffer',
-      headers: { 'User-Agent': 'EcoBlocks/1.0' }
-    });
-
+    const tile = await axios.get(url, { responseType: 'arraybuffer', headers: { 'User-Agent': 'EcoBlocks/1.0' } });
     res.set('Content-Type', 'image/png');
     res.send(tile.data);
   } catch {
@@ -140,48 +205,53 @@ app.get('/api/proxy-tile/:z/:x/:y', async (req, res) => {
   }
 });
 
+/* ─────────────────── 3. GEOCODE ─────────────────── */
 app.get("/api/geocode", async (req, res) => {
   const { q } = req.query;
   if (!q) return res.status(400).json({ error: "Missing query" });
 
   try {
-    const response = await axios.get(
-      "https://geocoding-api.open-meteo.com/v1/search",
-      {
-        params: {
-          name: q,
-          count: 1,
-          language: "en",
-          format: "json",
-        },
-        timeout: 8000,
-      }
-    );
+    // TomTom Geocoding
+    const response = await axios.get(`https://api.tomtom.com/search/2/geocode/${encodeURIComponent(q)}.json`, {
+      params: { key: TOMTOM_KEY, limit: 1 },
+      timeout: 8000,
+    });
 
-    if (!response.data?.results?.length) {
-      return res.status(404).json({ error: "Location not found" });
+    const results = response.data.results;
+    if (!results || results.length === 0) {
+      return usePositionStackFallback(q, res);
     }
 
-    const place = response.data.results[0];
-
-    res.json([
-      {
-        lat: place.latitude,
-        lon: place.longitude,
-        display_name: `${place.name}, ${place.country}`,
-      },
-    ]);
+    const place = results[0];
+    res.json([{
+      lat: place.position.lat,
+      lon: place.position.lon,
+      display_name: place.address.freeformAddress + ", " + place.address.country,
+      country: place.address.country
+    }]);
   } catch (err) {
-    console.error("❌ Open-Meteo geocode error:", err.message);
-    res.status(500).json({ error: "Geocoding failed" });
+    usePositionStackFallback(q, res);
   }
 });
 
-/* ─────────────────── 3. SIMULATION ─────────────────── */
+async function usePositionStackFallback(query, res) {
+  try {
+    const response = await axios.get("http://api.positionstack.com/v1/forward", {
+      params: { access_key: POSITIONSTACK_KEY, query: query, limit: 1 },
+      timeout: 5000,
+    });
+    if (!response.data?.data?.length) return res.status(404).json({ error: "Location not found" });
+    const place = response.data.data[0];
+    res.json([{ lat: place.latitude, lon: place.longitude, display_name: place.label, country: place.country }]);
+  } catch (err) {
+    res.status(500).json({ error: "Geocoding failed" });
+  }
+}
 
+/* ─────────────────── 4. SIMULATION ─────────────────── */
 app.post('/api/simulate', async (req, res) => {
   try {
-    const { blockId, intervention, currentAQI, userId } = req.body;
+    const { blockId, intervention, currentAQI, userId, buildingDensity, areaType } = req.body;
 
     const strategies = {
       "Green Wall": { r: 0.15, cost: 12000 },
@@ -190,19 +260,27 @@ app.post('/api/simulate', async (req, res) => {
     };
 
     const s = strategies[intervention] || strategies["Green Wall"];
-    const reduced = +(currentAQI * s.r).toFixed(1);
-    const newAQI = +(currentAQI - reduced).toFixed(1);
+    let reductionRate = s.r;
+
+    // Density Multiplier
+    let densityMultiplier = 1.0;
+    if (buildingDensity === "High") densityMultiplier = 1.2;
+    else if (buildingDensity === "Medium") densityMultiplier = 1.1;
+    else if (buildingDensity === "Sparse") densityMultiplier = 0.9;
+
+    reductionRate = reductionRate * densityMultiplier;
+
+    const reduced = +(currentAQI * reductionRate).toFixed(1);
+    const newAQI = Math.max(0, +(currentAQI - reduced).toFixed(1));
     const credits = Math.floor(reduced * 10);
 
     let aiInsight = "Urban air quality improved significantly.";
-    
-    // Wrap external API calls in try-catch to prevent crash if quotas exceeded
+
     try {
       if (GEMINI_KEY) {
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const result = await model.generateContent(
-          `Write a professional one-line headline about ${intervention} reducing pollution.`
-        );
+        const prompt = `Write a professional one-line headline about ${intervention} reducing pollution in a ${buildingDensity || 'urban'} density ${areaType || 'area'}.`;
+        const result = await model.generateContent(prompt);
         aiInsight = result.response.text();
       }
     } catch (e) {
@@ -215,10 +293,7 @@ app.post('/api/simulate', async (req, res) => {
         const voice = await axios.post(
           `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}`,
           { text: aiInsight },
-          {
-            headers: { 'xi-api-key': ELEVEN_LABS_KEY },
-            responseType: 'arraybuffer'
-          }
+          { headers: { 'xi-api-key': ELEVEN_LABS_KEY }, responseType: 'arraybuffer' }
         );
         audioBase64 = Buffer.from(voice.data).toString('base64');
       }
@@ -235,84 +310,36 @@ app.post('/api/simulate', async (req, res) => {
       ai_insight: aiInsight
     });
 
-    res.json({ newAQI, reductionAmount: reduced, credits, aiInsight, audioBase64 });
+    res.json({ newAQI, reductionAmount: reduced, credits, aiInsight, audioBase64, densityMultiplier });
   } catch (error) {
     console.error("Simulation Error:", error);
     res.status(500).json({ error: "Simulation failed" });
   }
 });
 
-/* ─────────────────── 4. HISTORY ─────────────────── */
-
+/* ─────────────────── 5. HISTORY ─────────────────── */
 app.get('/api/history', requireAuth, async (req, res) => {
   const userId = req.user.sub;
-
-  const { data } = await supabase
-    .from('simulations')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(10);
-
+  const { data } = await supabase.from('simulations').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(10);
   res.json(data || []);
 });
 
-/* ─────────────────── 5. REAL SOLANA MINT ─────────────────── */
-
+/* ─────────────────── 6. REAL SOLANA MINT ─────────────────── */
 app.post('/api/mint-credit', requireAuth, async (req, res) => {
   const { walletAddress, credits } = req.body;
   const userId = req.user.sub;
-
-  // Basic Validation
-  if (!credits || typeof credits !== 'number' || credits <= 0) {
-    return res.status(400).json({ error: "Invalid credit amount" });
-  }
-  if (!walletAddress) {
-    return res.status(400).json({ error: "Missing wallet address" });
-  }
-  
-  // NOTE: In a production environment, you must verify 'credits' against the DB
-  // e.g., SELECT sum(credits_earned) FROM simulations WHERE user_id = userId AND minted = false
+  if (!credits || credits <= 0 || !walletAddress) return res.status(400).json({ error: "Invalid request" });
 
   try {
-    if (!mintKeypair || !MINT) {
-      throw new Error("Solana configuration missing on server");
-    }
-
-    const tokenAccount =
-      await getOrCreateAssociatedTokenAccount(
-        connection,
-        mintKeypair,
-        MINT,
-        new PublicKey(walletAddress)
-      );
-
-    const tx = await mintTo(
-      connection,
-      mintKeypair,
-      MINT,
-      tokenAccount.address,
-      mintKeypair,
-      credits
-    );
-
-    await supabase.from('user_rewards').insert({
-      user_id: userId,
-      total_credits: credits,
-      tx_hash: tx,
-      status: 'MINTED'
-    });
-
+    if (!mintKeypair || !MINT) throw new Error("Solana configuration missing");
+    const tokenAccount = await getOrCreateAssociatedTokenAccount(connection, mintKeypair, MINT, new PublicKey(walletAddress));
+    const tx = await mintTo(connection, mintKeypair, MINT, tokenAccount.address, mintKeypair, credits);
+    await supabase.from('user_rewards').insert({ user_id: userId, total_credits: credits, tx_hash: tx, status: 'MINTED' });
     res.json({ success: true, txHash: tx });
   } catch (e) {
-    console.error("Mint failed:", e);
     res.status(500).json({ error: "Mint failed: " + e.message });
   }
 });
 
-/* ─────────────────── START ─────────────────── */
-
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-  console.log(`🚀 EcoBlocks production server running on ${PORT}`)
-);
+app.listen(PORT, () => console.log(`🚀 EcoBlocks production server running on ${PORT}`));

@@ -3,6 +3,7 @@ import React from "react";
 interface Props {
   aqi?: number | null;
   traffic?: string | null;
+  buildingDensity?: string | null; // Added prop
   intervention?: string | null;
   result?: {
     newAQI: number;
@@ -21,7 +22,7 @@ const getAQIColor = (aqi: number) => {
   return '#673AB7';
 };
 
-export const Dashboard: React.FC<Props> = ({ aqi, traffic, intervention, result }) => {
+export const Dashboard: React.FC<Props> = ({ aqi, traffic, buildingDensity, intervention, result }) => {
   // If no data, don't render anything (keeps UI clean)
   if (!aqi && !result) return null;
 
@@ -30,7 +31,7 @@ export const Dashboard: React.FC<Props> = ({ aqi, traffic, intervention, result 
       {!result && <h3>🌱 Urban Conditions</h3>}
 
       {aqi && !result && (
-        <div className="aqi-badge" style={{ 
+        <div className="aqi-badge" style={{
           background: `linear-gradient(135deg, ${getAQIColor(aqi)}20, ${getAQIColor(aqi)}40)`,
           border: `1px solid ${getAQIColor(aqi)}`
         }}>
@@ -42,6 +43,12 @@ export const Dashboard: React.FC<Props> = ({ aqi, traffic, intervention, result 
             <span>Traffic</span>
             <strong>{traffic}</strong>
           </div>
+          {/* New Density Row */}
+          <div className="stat-row">
+            <span>Density</span>
+            <strong>{buildingDensity || "Calculating..."}</strong>
+          </div>
+
           <div style={{
             height: '6px',
             background: `linear-gradient(90deg, #4CAF50, ${getAQIColor(aqi)})`,
@@ -53,7 +60,7 @@ export const Dashboard: React.FC<Props> = ({ aqi, traffic, intervention, result 
 
       {result && (
         <div className="simulation-results">
-          <h3 style={{marginBottom: '10px'}}>🌍 Impact Summary</h3>
+          <h3 style={{ marginBottom: '10px' }}>🌍 Impact Summary</h3>
           <div className="stat-row">
             <span>Intervention</span>
             <strong>{intervention}</strong>
