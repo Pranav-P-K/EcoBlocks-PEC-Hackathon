@@ -113,7 +113,6 @@ const App: React.FC = () => {
     );
 
     return () => {
-      selectionController.current?.handler.destroy();
       selectionController.current?.clearSelection();
     };
   }, [aqi]);
@@ -209,10 +208,21 @@ const App: React.FC = () => {
       >
         <Sidebar
           onSearch={handleCitySearch}
+          onLocateMe={(lat, lon) => {
+            if (!viewer.current) return;
+
+            viewer.current.camera.flyTo({
+              destination: Cesium.Cartesian3.fromDegrees(lon, lat, 2500),
+              duration: 2,
+            });
+
+            setCoords({ lat, lon }); // triggers AQI fetch
+          }}
           onSelectIntervention={setSelectedIntervention}
           onSimulate={handleSimulate}
           selectedIntervention={selectedIntervention}
         />
+
 
         <Dashboard
           aqi={aqi}
