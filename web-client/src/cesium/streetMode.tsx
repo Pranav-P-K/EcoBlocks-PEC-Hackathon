@@ -5,18 +5,33 @@ export function enterStreetMode(
   lat: number,
   lon: number
 ) {
-  viewer.camera.flyTo({
-    destination: Cesium.Cartesian3.fromDegrees(lon, lat, 15),
-    orientation: {
-      heading: Cesium.Math.toRadians(0),
-      pitch: Cesium.Math.toRadians(-8),
-      roll: 0,
-    },
-    duration: 1.2,
-  });
-
   const scene = viewer.scene;
+  const camera = viewer.camera;
 
+  // Target point (building / ground point)
+  const target = Cesium.Cartesian3.fromDegrees(lon, lat, 0);
+
+  // Drone parameters
+  const height = 300;           // AB (meters)
+  const distance = 500;         // AC (for 45° angle)
+  const heading = Cesium.Math.toRadians(0); // facing north (change if needed)
+
+  // Offset from target
+  const offset = new Cesium.HeadingPitchRange(
+    heading,
+    Cesium.Math.toRadians(-45), // 45° downward view
+    Math.sqrt(height * height + distance * distance)
+  );
+
+  camera.flyToBoundingSphere(
+    new Cesium.BoundingSphere(target, 1),
+    {
+      offset,
+      duration: 1.2,
+    }
+  );
+
+  // Visual effects
   scene.fog.enabled = true;
   scene.fog.density = 0.004;
   scene.fog.minimumBrightness = 0.3;

@@ -5,7 +5,7 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 
 /* ───────────── CESIUM CORE ───────────── */
 import { initViewer } from "./cesium/initViewer";
-import { enterCityMode, highlightAQIBlock } from "./cesium/cityMode";
+import { enterCityMode, enableBuildingAQISelection } from "./cesium/cityMode";
 import { enterStreetMode } from "./cesium/streetMode";
 
 /* ───────────── INTERVENTIONS ───────────── */
@@ -41,6 +41,7 @@ const App: React.FC = () => {
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [aqi, setAQI] = useState<number | null>(null);
   const [traffic, setTraffic] = useState<string | null>(null);
+  const selectionController = useRef<any>(null);
 
   const [selectedIntervention, setSelectedIntervention] = useState<
     "Green Wall" | "Algae Panel" | "Direct Air Capture" | null
@@ -91,17 +92,32 @@ const App: React.FC = () => {
       setAQI(data.aqi);
       setTraffic(data.traffic);
 
-      highlightAQIBlock(
-        viewer.current!,
-        coords.lat,
-        coords.lon,
-        data.aqi
-      );
-
       setSimulationResult(null);
       setSelectedIntervention(null);
     })();
   }, [coords]);
+
+  useEffect(() => {
+    if (!viewer.current || aqi === null) return;
+
+    // Clear old selection controller
+    if (selectionController.current) {
+      selectionController.current.handler.destroy();
+      selectionController.current.clearSelection();
+    }
+
+    // Enable multi-building selection
+    selectionController.current = enableBuildingAQISelection(
+      viewer.current,
+      aqi
+    );
+
+    return () => {
+      selectionController.current?.handler.destroy();
+      selectionController.current?.clearSelection();
+    };
+  }, [aqi]);
+
 
   /* ───────────── CITY SEARCH ───────────── */
   const handleCitySearch = async (city: string) => {
