@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useRef, useState } from "react";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 
@@ -21,16 +22,15 @@ import { runSimulation } from "./api/simulate";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
 import { Wallet } from "./components/Wallet";
+import LandingPage from "./components/LandingPage";
 
 import './App.css';
 import { Toaster } from 'react-hot-toast';
 
-Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN;
+// FIX: Define API_BASE properly - should be in .env
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001';
 
-// API Base URL from env or default
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
-
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   /* ───────────── REFS ───────────── */
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewer = useRef<Cesium.Viewer | null>(null);
@@ -62,11 +62,7 @@ const App: React.FC = () => {
     );
 
     handler.setInputAction((click: { position: Cesium.Cartesian2; }) => {
-      // FIX: Use pickPosition for terrain awareness instead of pickEllipsoid
-      // This ensures we get the coordinate on the terrain surface (mountains/hills)
-      // rather than the smooth sphere underground.
       const cartesian = viewer.current!.scene.pickPosition(click.position);
-
       if (!cartesian) return;
 
       const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
@@ -88,10 +84,8 @@ const App: React.FC = () => {
 
     (async () => {
       const data = await fetchAQIData(coords.lat, coords.lon);
-
       setAQI(data.aqi);
       setTraffic(data.traffic);
-
       setSimulationResult(null);
       setSelectedIntervention(null);
     })();
@@ -117,12 +111,10 @@ const App: React.FC = () => {
     };
   }, [aqi]);
 
-
   /* ───────────── CITY SEARCH ───────────── */
   const handleCitySearch = async (city: string) => {
     if (!viewer.current) return;
 
-    // FIX: Use env variable for API base instead of hardcoded localhost
     const res = await fetch(
       `${API_BASE}/geocode?q=${encodeURIComponent(city)}`
     );
@@ -144,29 +136,21 @@ const App: React.FC = () => {
   const handleSimulate = async () => {
     if (!coords || !aqi || !selectedIntervention || !viewer.current) return;
 
-    /* Switch to Street-Level Mode */
     enterStreetMode(viewer.current, coords.lat, coords.lon);
 
-    /* FIX: Remove existing particle system if present to prevent leaks */
     if (particleSystemRef.current) {
       viewer.current.scene.primitives.remove(particleSystemRef.current);
       particleSystemRef.current = null;
     }
 
-    /* Launch Correct Particle System and store ref */
     if (selectedIntervention === "Green Wall") {
       particleSystemRef.current = greenWallParticles(viewer.current, coords.lat, coords.lon);
-    }
-
-    if (selectedIntervention === "Algae Panel") {
+    } else if (selectedIntervention === "Algae Panel") {
       particleSystemRef.current = algaeParticles(viewer.current, coords.lat, coords.lon);
-    }
-
-    if (selectedIntervention === "Direct Air Capture") {
+    } else if (selectedIntervention === "Direct Air Capture") {
       particleSystemRef.current = dacParticles(viewer.current, coords.lat, coords.lon);
     }
 
-    /* Backend Simulation */
     try {
       const result = await runSimulation({
         blockId: 1,
@@ -178,15 +162,11 @@ const App: React.FC = () => {
       setCredits((prev) => prev + result.credits);
     } catch (error) {
       console.error("Simulation failed:", error);
-      // Optional: Add toast error here
     }
   };
 
-  /* ───────────── RENDER ───────────── */
   return (
     <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
-
-      {/* CESIUM MAP */}
       <div
         ref={viewerRef}
         style={{
@@ -196,7 +176,6 @@ const App: React.FC = () => {
         }}
       />
 
-      {/* UI OVERLAY */}
       <div
         style={{
           position: "absolute",
@@ -210,19 +189,16 @@ const App: React.FC = () => {
           onSearch={handleCitySearch}
           onLocateMe={(lat, lon) => {
             if (!viewer.current) return;
-
             viewer.current.camera.flyTo({
               destination: Cesium.Cartesian3.fromDegrees(lon, lat, 2500),
               duration: 2,
             });
-
-            setCoords({ lat, lon }); // triggers AQI fetch
+            setCoords({ lat, lon });
           }}
           onSelectIntervention={setSelectedIntervention}
           onSimulate={handleSimulate}
           selectedIntervention={selectedIntervention}
         />
-
 
         <Dashboard
           aqi={aqi}
@@ -247,7 +223,18 @@ const App: React.FC = () => {
       />
     </div>
   );
+};
 
+const App: React.FC = () => {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/dashboard" element={<AppContent />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
+  );
 };
 
 export default App;
