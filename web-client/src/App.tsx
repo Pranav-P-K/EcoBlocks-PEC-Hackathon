@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useRef, useState } from "react";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 
@@ -21,17 +22,16 @@ import { runSimulation } from "./api/simulate";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
 import { Wallet } from "./components/Wallet";
+import LandingPage from "./components/LandingPage";
 import { AnalyticsView } from "./components/AnalyticsView";
 
 import './App.css';
 import { Toaster } from 'react-hot-toast';
 
-Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN;
+// FIX: Define API_BASE properly - should be in .env
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001';
 
-// API Base URL from env or default
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
-
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   /* ───────────── REFS ───────────── */
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewer = useRef<Cesium.Viewer | null>(null);
@@ -89,7 +89,6 @@ const App: React.FC = () => {
 
     (async () => {
       const data = await fetchAQIData(coords.lat, coords.lon);
-
       setAQI(data.aqi);
       setTraffic(data.traffic);
       setBuildingDensity(data.buildingDensity);
@@ -128,7 +127,6 @@ const App: React.FC = () => {
     };
   }, [aqi]);
 
-
   /* ───────────── CITY SEARCH ───────────── */
   const handleCitySearch = async (city: string) => {
     if (!viewer.current) return;
@@ -154,7 +152,6 @@ const App: React.FC = () => {
   const handleSimulate = async () => {
     if (!coords || !aqi || !selectedIntervention || !viewer.current) return;
 
-    /* Switch to Street-Level Mode */
     enterStreetMode(viewer.current, coords.lat, coords.lon);
 
     /* FIX: Clear existing intervention visuals */
@@ -177,7 +174,6 @@ const App: React.FC = () => {
       interventionRef.current = dacParticles(viewer.current, coords.lat, coords.lon);
     }
 
-    /* Backend Simulation */
     try {
       const result = await runSimulation({
         blockId: 1,
@@ -196,7 +192,6 @@ const App: React.FC = () => {
     }
   };
 
-  /* ───────────── RENDER ───────────── */
   return (
     <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
 
@@ -227,6 +222,7 @@ const App: React.FC = () => {
               destination: Cesium.Cartesian3.fromDegrees(lon, lat, 2500),
               duration: 2,
             });
+            setCoords({ lat, lon });
             setCoords({ lat, lon });
           }}
           onSelectIntervention={setSelectedIntervention}
@@ -260,6 +256,18 @@ const App: React.FC = () => {
         }}
       />
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/dashboard" element={<AppContent />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
   );
 };
 
