@@ -211,13 +211,15 @@ app.get("/api/geocode", async (req, res) => {
   if (!q) return res.status(400).json({ error: "Missing query" });
 
   try {
+    // TomTom Fuzzy Search API (v2)
+    // Allows searching for addresses, POIs, and geographic features with typo tolerance.
     const response = await axios.get(`https://api.tomtom.com/search/2/search/${encodeURIComponent(q)}.json`, {
       params: {
         key: TOMTOM_KEY,
-        limit: 1,
+        limit: 5,         // Increase limit to get multiple suggestions
         minFuzzyLevel: 1,
         maxFuzzyLevel: 2,
-        typeahead: false
+        typeahead: true   // Enable typeahead for predictive matching
       },
       timeout: 8000,
     });
@@ -228,17 +230,21 @@ app.get("/api/geocode", async (req, res) => {
       return usePositionStackFallback(q, res);
     }
 
-    const place = results[0];
-    const poiName = place.poi && place.poi.name ? `${place.poi.name}, ` : "";
-    const address = place.address ? place.address.freeformAddress : "";
-    const displayName = `${poiName}${address}` || place.address.freeformAddress || place.address.country;
+    // Map all results to suggestion format
+    const suggestions = results.map(place => {
+      const poiName = place.poi && place.poi.name ? `${place.poi.name}, ` : "";
+      const address = place.address ? place.address.freeformAddress : "";
+      const displayName = `${poiName}${address}` || place.address.freeformAddress || place.address.country;
 
-    res.json([{
-      lat: place.position.lat,
-      lon: place.position.lon,
-      display_name: displayName,
-      country: place.address.country
-    }]);
+      return {
+        lat: place.position.lat,
+        lon: place.position.lon,
+        display_name: displayName,
+        country: place.address.country
+      };
+    });
+
+    res.json(suggestions);
   } catch (err) {
     console.error("❌ TomTom Fuzzy Search error:", err.message);
     usePositionStackFallback(q, res);
@@ -252,8 +258,15 @@ async function usePositionStackFallback(query, res) {
       timeout: 5000,
     });
     if (!response.data?.data?.length) return res.status(404).json({ error: "Location not found" });
+
+    // PositionStack Fallback (Single result usually, but mapping array to be safe)
     const place = response.data.data[0];
-    res.json([{ lat: place.latitude, lon: place.longitude, display_name: place.label, country: place.country }]);
+    res.json([{
+      lat: place.latitude,
+      lon: place.longitude,
+      display_name: place.label || place.name,
+      country: place.country
+    }]);
   } catch (err) {
     res.status(500).json({ error: "Geocoding failed" });
   }
@@ -268,9 +281,9 @@ app.post('/api/simulate', async (req, res) => {
       "Green Wall": { r: 0.15, cost: 12000 },
       "Algae Panel": { r: 0.25, cost: 25000 },
       "Direct Air Capture": { r: 0.45, cost: 80000 },
-      "Building Retrofit": { r: 0.20, cost: 45000 }, // Energy efficiency reduces ambient heat & indirect emissions
-      "Biochar": { r: 0.10, cost: 8000 }, // Soil sequestration
-      "Cool Roof + Solar": { r: 0.22, cost: 35000 } // Albedo + Renewable offset
+      "Building Retrofit": { r: 0.20, cost: 45000 },
+      "Biochar": { r: 0.10, cost: 8000 },
+      "Cool Roof + Solar": { r: 0.22, cost: 35000 }
     };
 
     const s = strategies[intervention] || strategies["Green Wall"];
