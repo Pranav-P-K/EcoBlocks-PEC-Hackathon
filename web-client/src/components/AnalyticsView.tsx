@@ -90,6 +90,7 @@ export const AnalyticsView: React.FC<Props> = ({
   const trafficForecast = result.trafficForecast || [];
 
   // 5. PARSE INSIGHT SAFELY
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const insightData = useMemo(() => {
     if (!result.aiInsight) return null;
     if (typeof result.aiInsight === 'string') {

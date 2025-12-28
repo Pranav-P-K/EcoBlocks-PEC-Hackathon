@@ -35,17 +35,20 @@ const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
 const App: React.FC = () => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewer = useRef<Cesium.Viewer | null>(null);
-  const interventionRef = useRef<any>(null); // Holds { remove: () => void }
+  const interventionRef = useRef<any>(null);
 
+  // 1. STATE DEFINITIONS
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [aqi, setAQI] = useState<number | null>(null);
   const [traffic, setTraffic] = useState<string | null>(null);
   const [buildingDensity, setBuildingDensity] = useState<string | null>(null);
 
-  // NEW: Track number of selected buildings
-  const [selectedBlockCount, setSelectedBlockCount] = useState(0);
-  const selectionController = useRef<any>(null);
+  // FIXED: Restored missing state variables
+  const [areaType, setAreaType] = useState<string | null>(null);
+  const [treeDensity, setTreeDensity] = useState<string | null>(null);
+  const [counts, setCounts] = useState({ buildings: 0, trees: 0 });
 
+  const selectionController = useRef<any>(null);
   const [selectedIntervention, setSelectedIntervention] = useState<string | null>(null);
   const [simulationResult, setSimulationResult] = useState<any>(null);
   const [credits, setCredits] = useState(0);
@@ -82,12 +85,16 @@ const App: React.FC = () => {
       setAQI(data.aqi);
       setTraffic(data.traffic);
       setBuildingDensity(data.buildingDensity);
+      
+      // FIXED: Update new states
+      setAreaType(data.areaType);
+      setTreeDensity(data.treeDensity);
+      setCounts({ buildings: data.buildingCount, trees: data.treeCount });
+
       setSimulationResult(null);
       setSelectedIntervention(null);
       setShowAnalytics(false);
-      setSelectedBlockCount(0); // Reset count on new area search
 
-      // Clear old visuals
       if (interventionRef.current) {
         interventionRef.current.remove();
         interventionRef.current = null;
@@ -103,11 +110,10 @@ const App: React.FC = () => {
       selectionController.current.clearSelection();
     }
 
-    // Pass callback to update count state
+    // FIXED: Removed 3rd argument (callback) to match cityMode.ts signature
     selectionController.current = enableBuildingAQISelection(
       viewer.current,
-      aqi,
-      (count) => setSelectedBlockCount(count)
+      aqi
     );
 
     return () => selectionController.current?.clearSelection();
@@ -131,15 +137,12 @@ const App: React.FC = () => {
 
     enterStreetMode(viewer.current, coords.lat, coords.lon);
 
-    // Clear previous visuals
     if (interventionRef.current) {
       interventionRef.current.remove();
       interventionRef.current = null;
     }
 
     // --- APPLY VISUALS ---
-    // Note: For now visual is applied to the center 'coords'. 
-    // In a full implementation, we would iterate over 'selectedBuildings' from cityMode.
     switch (selectedIntervention) {
       case "Green Wall":
         interventionRef.current = addGreenWall(viewer.current, coords.lat, coords.lon);
@@ -167,12 +170,19 @@ const App: React.FC = () => {
         blockId: 1,
         intervention: selectedIntervention as any,
         currentAQI: aqi,
+        
+        // Context Data
         buildingDensity: buildingDensity,
+        areaType: areaType, // FIXED: Now passing correctly
+        treeDensity: treeDensity, // FIXED: Now passing correctly
+        treeCount: counts.trees,
+        
         traffic: traffic,
-        areaType: "Urban",
         userId: "guest",
-        // Pass block count to adjust credit/impact calculation if backend supports it
-        blockCount: selectedBlockCount > 0 ? selectedBlockCount : 1
+        lat: coords.lat,
+        lon: coords.lon
+        
+        // FIXED: Removed 'blockCount' as it doesn't exist on the interface
       });
 
       setSimulationResult(result);
@@ -194,12 +204,11 @@ const App: React.FC = () => {
           intervention={selectedIntervention!}
           reductionAmount={simulationResult.reductionAmount}
           estimatedCost={simulationResult.estimatedCost || 0}
-          densityMultiplier={simulationResult.densityMultiplier || 1}
-          aiInsight={simulationResult.aiInsight}
           traffic={traffic || "Unknown"}
           buildingDensity={buildingDensity || "Unknown"}
           
-          // 1. FIX: Pass the entire result object
+          // FIXED: Removed extra props (densityMultiplier, aiInsight)
+          // The result object contains everything needed
           result={simulationResult} 
           
           onClose={() => setShowAnalytics(false)}
@@ -215,11 +224,9 @@ const App: React.FC = () => {
             viewer.current.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, 2500), duration: 2 });
             setCoords({ lat, lon });
           }}
-          // 2. FIX: Type cast to solve mismatch
           onSelectIntervention={(val: any) => setSelectedIntervention(val)}
           onSimulate={handleSimulate}
           selectedIntervention={selectedIntervention}
-          selectedBlockCount={selectedBlockCount} // PASS COUNT TO SIDEBAR
         />
 
         {!showAnalytics && (
@@ -228,7 +235,6 @@ const App: React.FC = () => {
             traffic={traffic}
             areaType={areaType}
             treeDensity={treeDensity}
-          
             buildingDensity={buildingDensity}
             intervention={selectedIntervention}
             result={simulationResult}
