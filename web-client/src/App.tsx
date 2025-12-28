@@ -10,7 +10,7 @@ import { enterCityMode, enableBuildingAQISelection } from "./cesium/cityMode";
 import { enterStreetMode } from "./cesium/streetMode";
 
 /* ───────────── INTERVENTIONS ───────────── */
-import { addGreenWall } from "./cesium/interventions/greenWall"; // UPDATED IMPORT
+import { addGreenWall } from "./cesium/interventions/greenWall"; 
 import { algaeParticles } from "./cesium/interventions/algae";
 import { dacParticles } from "./cesium/interventions/dac";
 
@@ -28,23 +28,24 @@ import { AnalyticsView } from "./components/AnalyticsView";
 import './App.css';
 import { Toaster } from 'react-hot-toast';
 
-// FIX: Define API_BASE properly - should be in .env
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001';
 
 const AppContent: React.FC = () => {
   /* ───────────── REFS ───────────── */
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewer = useRef<Cesium.Viewer | null>(null);
-
-  // Ref to track the current intervention (can be a primitive or an object with remove())
   const interventionRef = useRef<any>(null);
+  const selectionController = useRef<any>(null);
 
   /* ───────────── GLOBAL STATE ───────────── */
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [aqi, setAQI] = useState<number | null>(null);
   const [traffic, setTraffic] = useState<string | null>(null);
   const [buildingDensity, setBuildingDensity] = useState<string | null>(null);
-  const selectionController = useRef<any>(null);
+  
+  const [areaType, setAreaType] = useState<string | null>(null);
+  const [treeDensity, setTreeDensity] = useState<string | null>(null);
+  const [counts, setCounts] = useState({ buildings: 0, trees: 0 });
 
   const [selectedIntervention, setSelectedIntervention] = useState<
     "Green Wall" | "Algae Panel" | "Direct Air Capture" | null
@@ -52,7 +53,6 @@ const AppContent: React.FC = () => {
 
   const [simulationResult, setSimulationResult] = useState<any>(null);
   const [credits, setCredits] = useState(0);
-
   const [showAnalytics, setShowAnalytics] = useState(false);
 
   /* ───────────── INIT CESIUM ───────────── */
@@ -92,12 +92,15 @@ const AppContent: React.FC = () => {
       setAQI(data.aqi);
       setTraffic(data.traffic);
       setBuildingDensity(data.buildingDensity);
-
+      setAreaType(data.areaType);
+        
+      setTreeDensity(data.treeDensity);
+      setCounts({ buildings: data.buildingCount, trees: data.treeCount });
+      
       setSimulationResult(null);
       setSelectedIntervention(null);
       setShowAnalytics(false);
 
-      // Clear previous intervention when moving location
       if (interventionRef.current) {
         if (typeof interventionRef.current.remove === 'function') {
           interventionRef.current.remove();
@@ -109,6 +112,7 @@ const AppContent: React.FC = () => {
     })();
   }, [coords]);
 
+  /* ───────────── SELECTION HIGHLIGHT ───────────── */
   useEffect(() => {
     if (!viewer.current || aqi === null) return;
 
@@ -154,7 +158,7 @@ const AppContent: React.FC = () => {
 
     enterStreetMode(viewer.current, coords.lat, coords.lon);
 
-    /* FIX: Clear existing intervention visuals */
+    // Clear visuals
     if (interventionRef.current) {
       if (typeof interventionRef.current.remove === 'function') {
         interventionRef.current.remove();
@@ -164,9 +168,8 @@ const AppContent: React.FC = () => {
       interventionRef.current = null;
     }
 
-    /* Launch Visuals based on Selection */
+    // Add visuals
     if (selectedIntervention === "Green Wall") {
-      // NEW: Uses the object with .remove()
       interventionRef.current = addGreenWall(viewer.current, coords.lat, coords.lon);
     } else if (selectedIntervention === "Algae Panel") {
       interventionRef.current = algaeParticles(viewer.current, coords.lat, coords.lon);
@@ -180,13 +183,17 @@ const AppContent: React.FC = () => {
         intervention: selectedIntervention,
         currentAQI: aqi,
         buildingDensity: buildingDensity,
-        traffic: traffic, // Passing traffic for better AI insights
-        areaType: "Urban",
+        areaType: areaType,
+        treeDensity: treeDensity,
+        treeCount: counts.trees,
+        lat: coords.lat,
+        lon: coords.lon,
+        traffic: traffic,
         userId: "guest"
       });
 
       setSimulationResult(result);
-      setCredits((prev) => prev + result.credits);
+      setCredits(result.credits);
     } catch (error) {
       console.error("Simulation failed:", error);
     }
@@ -197,6 +204,7 @@ const AppContent: React.FC = () => {
 
       <div ref={viewerRef} style={{ position: "absolute", inset: 0, zIndex: 0 }} />
 
+      {/* ANALYTICS OVERLAY */}
       {showAnalytics && simulationResult && aqi && (
         <AnalyticsView
           initialAQI={aqi}
@@ -204,15 +212,17 @@ const AppContent: React.FC = () => {
           intervention={selectedIntervention!}
           reductionAmount={simulationResult.reductionAmount}
           estimatedCost={simulationResult.estimatedCost || 0}
-          densityMultiplier={simulationResult.densityMultiplier || 1}
-          aiInsight={simulationResult.aiInsight || "No insight available."}
           traffic={traffic || "Unknown"}
           buildingDensity={buildingDensity || "Unknown"}
-          predictionData={simulationResult.predictionData}
+          
+          // 1. FIX: Pass the entire result object
+          result={simulationResult} 
+          
           onClose={() => setShowAnalytics(false)}
         />
       )}
 
+      {/* MAIN UI LAYER */}
       <div style={{ position: "absolute", inset: 0, display: "flex", pointerEvents: "none", zIndex: 10 }}>
         <Sidebar
           onSearch={handleCitySearch}
@@ -223,9 +233,9 @@ const AppContent: React.FC = () => {
               duration: 2,
             });
             setCoords({ lat, lon });
-            setCoords({ lat, lon });
           }}
-          onSelectIntervention={setSelectedIntervention}
+          // 2. FIX: Type cast to solve mismatch
+          onSelectIntervention={(val: any) => setSelectedIntervention(val)}
           onSimulate={handleSimulate}
           selectedIntervention={selectedIntervention}
         />
@@ -234,6 +244,9 @@ const AppContent: React.FC = () => {
           <Dashboard
             aqi={aqi}
             traffic={traffic}
+            areaType={areaType}
+            treeDensity={treeDensity}
+          
             buildingDensity={buildingDensity}
             intervention={selectedIntervention}
             result={simulationResult}
