@@ -205,31 +205,42 @@ app.get('/api/proxy-tile/:z/:x/:y', async (req, res) => {
   }
 });
 
-/* ─────────────────── 3. GEOCODE ─────────────────── */
+/* ─────────────────── 3. GEOCODE (TOMTOM FUZZY SEARCH) ─────────────────── */
 app.get("/api/geocode", async (req, res) => {
   const { q } = req.query;
   if (!q) return res.status(400).json({ error: "Missing query" });
 
   try {
-    // TomTom Geocoding
-    const response = await axios.get(`https://api.tomtom.com/search/2/geocode/${encodeURIComponent(q)}.json`, {
-      params: { key: TOMTOM_KEY, limit: 1 },
+    const response = await axios.get(`https://api.tomtom.com/search/2/search/${encodeURIComponent(q)}.json`, {
+      params: {
+        key: TOMTOM_KEY,
+        limit: 1,
+        minFuzzyLevel: 1,
+        maxFuzzyLevel: 2,
+        typeahead: false
+      },
       timeout: 8000,
     });
 
     const results = response.data.results;
     if (!results || results.length === 0) {
+      console.log("TomTom Fuzzy Search found no results, trying fallback...");
       return usePositionStackFallback(q, res);
     }
 
     const place = results[0];
+    const poiName = place.poi && place.poi.name ? `${place.poi.name}, ` : "";
+    const address = place.address ? place.address.freeformAddress : "";
+    const displayName = `${poiName}${address}` || place.address.freeformAddress || place.address.country;
+
     res.json([{
       lat: place.position.lat,
       lon: place.position.lon,
-      display_name: place.address.freeformAddress + ", " + place.address.country,
+      display_name: displayName,
       country: place.address.country
     }]);
   } catch (err) {
+    console.error("❌ TomTom Fuzzy Search error:", err.message);
     usePositionStackFallback(q, res);
   }
 });
@@ -251,12 +262,15 @@ async function usePositionStackFallback(query, res) {
 /* ─────────────────── 4. SIMULATION ─────────────────── */
 app.post('/api/simulate', async (req, res) => {
   try {
-    const { blockId, intervention, currentAQI, userId, buildingDensity, areaType } = req.body;
+    const { blockId, intervention, currentAQI, userId, buildingDensity, areaType, traffic } = req.body;
 
     const strategies = {
       "Green Wall": { r: 0.15, cost: 12000 },
       "Algae Panel": { r: 0.25, cost: 25000 },
-      "Direct Air Capture": { r: 0.45, cost: 80000 }
+      "Direct Air Capture": { r: 0.45, cost: 80000 },
+      "Building Retrofit": { r: 0.20, cost: 45000 }, // Energy efficiency reduces ambient heat & indirect emissions
+      "Biochar": { r: 0.10, cost: 8000 }, // Soil sequestration
+      "Cool Roof + Solar": { r: 0.22, cost: 35000 } // Albedo + Renewable offset
     };
 
     const s = strategies[intervention] || strategies["Green Wall"];
@@ -273,15 +287,43 @@ app.post('/api/simulate', async (req, res) => {
     const reduced = +(currentAQI * reductionRate).toFixed(1);
     const newAQI = Math.max(0, +(currentAQI - reduced).toFixed(1));
     const credits = Math.floor(reduced * 10);
+    const estimatedCost = s.cost;
 
     let aiInsight = "Urban air quality improved significantly.";
+    let predictionData = [];
 
     try {
       if (GEMINI_KEY) {
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const prompt = `Write a professional one-line headline about ${intervention} reducing pollution in a ${buildingDensity || 'urban'} density ${areaType || 'area'}.`;
+        const prompt = `
+          Act as an environmental data analyst.
+          Input:
+          - Current AQI: ${currentAQI}
+          - Intervention: ${intervention}
+          - Traffic Conditions: ${traffic || 'Moderate'}
+          - Building Density: ${buildingDensity || 'Medium'}
+          
+          Tasks:
+          1. Write a professional one-line headline about the impact.
+          2. Predict the AQI values for the next 12 months (array of 12 integers) taking seasonality and the intervention impact into account.
+          
+          Return strictly in JSON format:
+          {
+            "insight": "headline string",
+            "aqiForecast": [num1, num2, ..., num12]
+          }
+        `;
         const result = await model.generateContent(prompt);
-        aiInsight = result.response.text();
+        const text = result.response.text();
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          aiInsight = parsed.insight;
+          predictionData = parsed.aqiForecast;
+        } else {
+          aiInsight = text;
+        }
       }
     } catch (e) {
       console.error("Gemini API Error:", e.message);
@@ -310,7 +352,7 @@ app.post('/api/simulate', async (req, res) => {
       ai_insight: aiInsight
     });
 
-    res.json({ newAQI, reductionAmount: reduced, credits, aiInsight, audioBase64, densityMultiplier });
+    res.json({ newAQI, reductionAmount: reduced, credits, estimatedCost, aiInsight, audioBase64, densityMultiplier, predictionData });
   } catch (error) {
     console.error("Simulation Error:", error);
     res.status(500).json({ error: "Simulation failed" });
