@@ -17,7 +17,7 @@ const interventions = [
     emoji: "🌿",
     description: "Vertical gardens reducing heat",
     cost: 12000,
-    rate: "$40 / sq.ft"
+    rate: "₹40 / sq.ft"
   },
   {
     id: "algae-panel",
@@ -25,7 +25,7 @@ const interventions = [
     emoji: "🧪",
     description: "Bio-reactive CO2 capture",
     cost: 25000,
-    rate: "$85 / sq.ft"
+    rate: "₹85 / sq.ft"
   },
   {
     id: "direct-air-capture",
@@ -33,7 +33,7 @@ const interventions = [
     emoji: "🏭",
     description: "Industrial carbon removal",
     cost: 80000,
-    rate: "$40,000 / unit"
+    rate: "₹40,000 / unit"
   },
   {
     id: "retrofit",
@@ -41,7 +41,7 @@ const interventions = [
     emoji: "🏗️",
     description: "Insulation & Envelope upgrades",
     cost: 45000,
-    rate: "$15 / sq.ft"
+    rate: "₹15 / sq.ft"
   },
   {
     id: "biochar",
@@ -49,7 +49,7 @@ const interventions = [
     emoji: "🪨",
     description: "Soil carbon sequestration",
     cost: 8000,
-    rate: "$2 / sq.ft"
+    rate: "₹2 / sq.ft"
   },
   {
     id: "cool-roof",
@@ -57,7 +57,7 @@ const interventions = [
     emoji: "☀️",
     description: "High albedo & Renewable energy",
     cost: 35000,
-    rate: "$12 / sq.ft"
+    rate: "₹12 / sq.ft"
   }
 ];
 
@@ -73,7 +73,7 @@ export const Sidebar: React.FC<Props> = ({
   const [isExpanded, setIsExpanded] = useState(false);
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup timeout on unmount
   useEffect(() => {

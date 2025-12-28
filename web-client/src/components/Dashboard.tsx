@@ -48,12 +48,12 @@ const INTERVENTION_COSTS: Record<string, number> = {
 };
 
 const INTERVENTION_RATES: Record<string, string> = {
-  "Green Wall": "$40 / sq.ft",
-  "Algae Panel": "$85 / sq.ft",
-  "Direct Air Capture": "$40,000 / unit",
-  "Building Retrofit": "$15 / sq.ft",
-  "Biochar": "$2 / sq.ft",
-  "Cool Roof + Solar": "$12 / sq.ft"
+  "Green Wall": "₹40 / sq.ft",
+  "Algae Panel": "₹85 / sq.ft",
+  "Direct Air Capture": "₹40,000 / unit",
+  "Building Retrofit": "₹15 / sq.ft",
+  "Biochar": "₹2 / sq.ft",
+  "Cool Roof + Solar": "₹12 / sq.ft"
 };
 
 export const Dashboard: React.FC<Props> = ({

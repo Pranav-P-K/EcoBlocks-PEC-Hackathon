@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 
 interface Props {
@@ -11,6 +12,12 @@ export const Wallet: React.FC<Props> = ({ userId, credits = 0 }) => {
   const [isMinting, setIsMinting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false); // For mobile click to expand
   const { getIdToken } = useAuth();
+  const navigate = useNavigate();
+
+  const handleMarketplace = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent toggling expansion
+    navigate('/marketplace');
+  };
 
   const mintCredits = async (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent toggling expansion
@@ -73,6 +80,23 @@ export const Wallet: React.FC<Props> = ({ userId, credits = 0 }) => {
           disabled={credits === 0 || isMinting}
         >
           {isMinting ? 'Minting...' : 'Mint to Solana'}
+        </button>
+        <button 
+          className="marketplace-btn"
+          onClick={handleMarketplace}
+          style={{
+            marginTop: '8px',
+            padding: '8px 16px',
+            backgroundColor: '#4CAF50',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            width: '100%'
+          }}
+        >
+          🏪 Find Vendors
         </button>
         {credits > 0 && (
           <p style={{ 
