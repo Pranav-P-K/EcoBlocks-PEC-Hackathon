@@ -85,7 +85,7 @@ export function addDirectAirCapture(
     const intakeCenter = Cesium.Cartesian3.fromDegrees(lon, lat, roofElevation + (unitHeight / 2));
 
     // Custom update function to simulate "Suction" physics
-    const suctionUpdate = (particle: any, dt: number) => {
+    const suctionUpdate = (particle: { position: Cesium.Cartesian3; life: number; }, dt: number) => {
       const position = particle.position;
       const direction = new Cesium.Cartesian3();
 
