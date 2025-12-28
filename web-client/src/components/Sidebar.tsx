@@ -4,9 +4,9 @@ import React, { useState } from "react";
 interface Props {
   onSearch: (city: string) => void;
   onLocateMe: (lat: number, lon: number) => void
-  onSelectIntervention: (value: "Green Wall" | "Algae Panel" | "Direct Air Capture" | null) => void;
+  onSelectIntervention: (value: string | null) => void;
   onSimulate: () => void;
-  selectedIntervention: "Green Wall" | "Algae Panel" | "Direct Air Capture" | null;
+  selectedIntervention: string | null;
 }
 
 const interventions = [
@@ -14,31 +14,53 @@ const interventions = [
     id: "green-wall",
     name: "Green Wall",
     emoji: "🌿",
-    description: "Vertical gardens reducing heat"
+    description: "Vertical gardens reducing heat",
+    cost: 12000
   },
   {
     id: "algae-panel",
     name: "Algae Panel",
     emoji: "🧪",
-    description: "Bio-reactive CO2 capture"
+    description: "Bio-reactive CO2 capture",
+    cost: 25000
   },
   {
     id: "direct-air-capture",
     name: "Direct Air Capture",
     emoji: "🏭",
-    description: "Industrial carbon removal"
+    description: "Industrial carbon removal",
+    cost: 80000
+  },
+  {
+    id: "retrofit",
+    name: "Building Retrofit",
+    emoji: "🏗️",
+    description: "Insulation & Envelope upgrades",
+    cost: 45000
+  },
+  {
+    id: "biochar",
+    name: "Biochar",
+    emoji: "🪨",
+    description: "Soil carbon sequestration",
+    cost: 8000
+  },
+  {
+    id: "cool-roof",
+    name: "Cool Roof + Solar",
+    emoji: "☀️",
+    description: "High albedo & Renewable energy",
+    cost: 35000
   }
 ];
 
 export const Sidebar: React.FC<Props> = ({ onSearch, onLocateMe, onSelectIntervention, onSimulate, selectedIntervention }) => {
   const [searchQuery, setSearchQuery] = useState("");
-  // Mobile state: 'collapsed' or 'expanded'
   const [isExpanded, setIsExpanded] = useState(false);
 
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && searchQuery.trim()) {
       onSearch(searchQuery);
-      // On mobile, collapse after search to show map
       setIsExpanded(false);
     }
   };
@@ -55,10 +77,7 @@ export const Sidebar: React.FC<Props> = ({ onSearch, onLocateMe, onSelectInterve
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-
-        onLocateMe(lat, lon);
+        onLocateMe(position.coords.latitude, position.coords.longitude);
         setIsExpanded(false);
       },
       (error) => {
@@ -71,7 +90,6 @@ export const Sidebar: React.FC<Props> = ({ onSearch, onLocateMe, onSelectInterve
 
   return (
     <div className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}`}>
-      {/* Mobile Drag Handle */}
       <div className="mobile-handle" onClick={toggleSidebar} />
 
       <div className="sidebar-header" onClick={() => setIsExpanded(true)}>
@@ -88,17 +106,9 @@ export const Sidebar: React.FC<Props> = ({ onSearch, onLocateMe, onSelectInterve
             onKeyDown={handleSearch}
             onFocus={() => setIsExpanded(true)}
           />
-
-          <button
-            className="locate-btn"
-            title="Use my location"
-            onClick={handleLocateMe}
-          >
-            📍
-          </button>
+          <button className="locate-btn" title="Use my location" onClick={handleLocateMe}>📍</button>
         </div>
       </div>
-
 
       <div className="intervention-grid">
         <h4>Select Intervention</h4>
@@ -107,7 +117,7 @@ export const Sidebar: React.FC<Props> = ({ onSearch, onLocateMe, onSelectInterve
             key={intervention.id}
             className={`intervention-btn ${selectedIntervention === intervention.name ? "selected" : ""}`}
             onClick={() => {
-              onSelectIntervention(intervention.name as any);
+              onSelectIntervention(intervention.name);
               setIsExpanded(true);
             }}
           >
@@ -115,6 +125,9 @@ export const Sidebar: React.FC<Props> = ({ onSearch, onLocateMe, onSelectInterve
             <div className="intervention-info">
               <span className="intervention-name">{intervention.name}</span>
               <span className="intervention-desc">{intervention.description}</span>
+              <span className="intervention-cost" style={{ fontSize: '0.75rem', color: '#2e7d32', fontWeight: 'bold' }}>
+                Est. ${intervention.cost.toLocaleString()}
+              </span>
             </div>
           </button>
         ))}
@@ -124,7 +137,7 @@ export const Sidebar: React.FC<Props> = ({ onSearch, onLocateMe, onSelectInterve
         className="simulate-btn"
         onClick={() => {
           onSimulate();
-          setIsExpanded(false); // Collapse to show simulation
+          setIsExpanded(false);
         }}
         disabled={!selectedIntervention}
       >

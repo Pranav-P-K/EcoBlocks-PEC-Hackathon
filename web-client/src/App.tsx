@@ -9,7 +9,7 @@ import { enterCityMode, enableBuildingAQISelection } from "./cesium/cityMode";
 import { enterStreetMode } from "./cesium/streetMode";
 
 /* ───────────── INTERVENTIONS ───────────── */
-import { greenWallParticles } from "./cesium/interventions/greenWall";
+import { addGreenWall } from "./cesium/interventions/greenWall"; // UPDATED IMPORT
 import { algaeParticles } from "./cesium/interventions/algae";
 import { dacParticles } from "./cesium/interventions/dac";
 
@@ -21,6 +21,7 @@ import { runSimulation } from "./api/simulate";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
 import { Wallet } from "./components/Wallet";
+import { AnalyticsView } from "./components/AnalyticsView";
 
 import './App.css';
 import { Toaster } from 'react-hot-toast';
@@ -34,13 +35,15 @@ const App: React.FC = () => {
   /* ───────────── REFS ───────────── */
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewer = useRef<Cesium.Viewer | null>(null);
-  // Ref to track the currently active particle system primitive
-  const particleSystemRef = useRef<any>(null);
+
+  // Ref to track the current intervention (can be a primitive or an object with remove())
+  const interventionRef = useRef<any>(null);
 
   /* ───────────── GLOBAL STATE ───────────── */
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [aqi, setAQI] = useState<number | null>(null);
   const [traffic, setTraffic] = useState<string | null>(null);
+  const [buildingDensity, setBuildingDensity] = useState<string | null>(null);
   const selectionController = useRef<any>(null);
 
   const [selectedIntervention, setSelectedIntervention] = useState<
@@ -49,6 +52,8 @@ const App: React.FC = () => {
 
   const [simulationResult, setSimulationResult] = useState<any>(null);
   const [credits, setCredits] = useState(0);
+
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   /* ───────────── INIT CESIUM ───────────── */
   useEffect(() => {
@@ -62,11 +67,7 @@ const App: React.FC = () => {
     );
 
     handler.setInputAction((click: { position: Cesium.Cartesian2; }) => {
-      // FIX: Use pickPosition for terrain awareness instead of pickEllipsoid
-      // This ensures we get the coordinate on the terrain surface (mountains/hills)
-      // rather than the smooth sphere underground.
       const cartesian = viewer.current!.scene.pickPosition(click.position);
-
       if (!cartesian) return;
 
       const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
@@ -91,22 +92,32 @@ const App: React.FC = () => {
 
       setAQI(data.aqi);
       setTraffic(data.traffic);
+      setBuildingDensity(data.buildingDensity);
 
       setSimulationResult(null);
       setSelectedIntervention(null);
+      setShowAnalytics(false);
+
+      // Clear previous intervention when moving location
+      if (interventionRef.current) {
+        if (typeof interventionRef.current.remove === 'function') {
+          interventionRef.current.remove();
+        } else {
+          viewer.current!.scene.primitives.remove(interventionRef.current);
+        }
+        interventionRef.current = null;
+      }
     })();
   }, [coords]);
 
   useEffect(() => {
     if (!viewer.current || aqi === null) return;
 
-    // Clear old selection controller
     if (selectionController.current) {
       selectionController.current.handler.destroy();
       selectionController.current.clearSelection();
     }
 
-    // Enable multi-building selection
     selectionController.current = enableBuildingAQISelection(
       viewer.current,
       aqi
@@ -122,7 +133,6 @@ const App: React.FC = () => {
   const handleCitySearch = async (city: string) => {
     if (!viewer.current) return;
 
-    // FIX: Use env variable for API base instead of hardcoded localhost
     const res = await fetch(
       `${API_BASE}/geocode?q=${encodeURIComponent(city)}`
     );
@@ -147,23 +157,24 @@ const App: React.FC = () => {
     /* Switch to Street-Level Mode */
     enterStreetMode(viewer.current, coords.lat, coords.lon);
 
-    /* FIX: Remove existing particle system if present to prevent leaks */
-    if (particleSystemRef.current) {
-      viewer.current.scene.primitives.remove(particleSystemRef.current);
-      particleSystemRef.current = null;
+    /* FIX: Clear existing intervention visuals */
+    if (interventionRef.current) {
+      if (typeof interventionRef.current.remove === 'function') {
+        interventionRef.current.remove();
+      } else {
+        viewer.current.scene.primitives.remove(interventionRef.current);
+      }
+      interventionRef.current = null;
     }
 
-    /* Launch Correct Particle System and store ref */
+    /* Launch Visuals based on Selection */
     if (selectedIntervention === "Green Wall") {
-      particleSystemRef.current = greenWallParticles(viewer.current, coords.lat, coords.lon);
-    }
-
-    if (selectedIntervention === "Algae Panel") {
-      particleSystemRef.current = algaeParticles(viewer.current, coords.lat, coords.lon);
-    }
-
-    if (selectedIntervention === "Direct Air Capture") {
-      particleSystemRef.current = dacParticles(viewer.current, coords.lat, coords.lon);
+      // NEW: Uses the object with .remove()
+      interventionRef.current = addGreenWall(viewer.current, coords.lat, coords.lon);
+    } else if (selectedIntervention === "Algae Panel") {
+      interventionRef.current = algaeParticles(viewer.current, coords.lat, coords.lon);
+    } else if (selectedIntervention === "Direct Air Capture") {
+      interventionRef.current = dacParticles(viewer.current, coords.lat, coords.lon);
     }
 
     /* Backend Simulation */
@@ -172,13 +183,16 @@ const App: React.FC = () => {
         blockId: 1,
         intervention: selectedIntervention,
         currentAQI: aqi,
+        buildingDensity: buildingDensity,
+        traffic: traffic, // Passing traffic for better AI insights
+        areaType: "Urban",
+        userId: "guest"
       });
 
       setSimulationResult(result);
       setCredits((prev) => prev + result.credits);
     } catch (error) {
       console.error("Simulation failed:", error);
-      // Optional: Add toast error here
     }
   };
 
@@ -186,50 +200,50 @@ const App: React.FC = () => {
   return (
     <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
 
-      {/* CESIUM MAP */}
-      <div
-        ref={viewerRef}
-        style={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 0,
-        }}
-      />
+      <div ref={viewerRef} style={{ position: "absolute", inset: 0, zIndex: 0 }} />
 
-      {/* UI OVERLAY */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          pointerEvents: "none",
-          zIndex: 10,
-        }}
-      >
+      {showAnalytics && simulationResult && aqi && (
+        <AnalyticsView
+          initialAQI={aqi}
+          newAQI={simulationResult.newAQI}
+          intervention={selectedIntervention!}
+          reductionAmount={simulationResult.reductionAmount}
+          estimatedCost={simulationResult.estimatedCost || 0}
+          densityMultiplier={simulationResult.densityMultiplier || 1}
+          aiInsight={simulationResult.aiInsight || "No insight available."}
+          traffic={traffic || "Unknown"}
+          buildingDensity={buildingDensity || "Unknown"}
+          predictionData={simulationResult.predictionData}
+          onClose={() => setShowAnalytics(false)}
+        />
+      )}
+
+      <div style={{ position: "absolute", inset: 0, display: "flex", pointerEvents: "none", zIndex: 10 }}>
         <Sidebar
           onSearch={handleCitySearch}
           onLocateMe={(lat, lon) => {
             if (!viewer.current) return;
-
             viewer.current.camera.flyTo({
               destination: Cesium.Cartesian3.fromDegrees(lon, lat, 2500),
               duration: 2,
             });
-
-            setCoords({ lat, lon }); // triggers AQI fetch
+            setCoords({ lat, lon });
           }}
           onSelectIntervention={setSelectedIntervention}
           onSimulate={handleSimulate}
           selectedIntervention={selectedIntervention}
         />
 
-
-        <Dashboard
-          aqi={aqi}
-          traffic={traffic}
-          intervention={selectedIntervention}
-          result={simulationResult}
-        />
+        {!showAnalytics && (
+          <Dashboard
+            aqi={aqi}
+            traffic={traffic}
+            buildingDensity={buildingDensity}
+            intervention={selectedIntervention}
+            result={simulationResult}
+            onViewAnalytics={() => setShowAnalytics(true)}
+          />
+        )}
 
         <Wallet credits={credits} />
       </div>
@@ -247,7 +261,6 @@ const App: React.FC = () => {
       />
     </div>
   );
-
 };
 
 export default App;

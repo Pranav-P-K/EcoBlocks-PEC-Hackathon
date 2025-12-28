@@ -63,27 +63,56 @@ export function enableBuildingAQISelection(
     // Toggle behavior
     if (selectedBuildings.has(picked)) {
       // Restore original color
-      picked.color = selectedBuildings.get(picked)!;
+      try {
+        if (picked.content && !picked.content.isDestroyed()) {
+          picked.color = selectedBuildings.get(picked)!;
+        }
+      } catch (e) {
+        // Feature/Tile destroyed
+      }
       selectedBuildings.delete(picked);
       return;
     }
 
     // Save original color
-    selectedBuildings.set(picked, picked.color.clone());
+    try {
+      // Deep clone the color to ensure we have a stable reference
+      selectedBuildings.set(picked, picked.color.clone());
+    } catch (e) {
+      // Fallback if color isn't readable
+      selectedBuildings.set(picked, Cesium.Color.WHITE.clone());
+    }
 
     // Optional: simulate per-building AQI variation
     const variance = Math.floor(Math.random() * 30) - 15;
     const buildingAQI = Math.max(0, baseAqi + variance);
 
     // Apply AQI color
-    picked.color = getAQIColor(buildingAQI);
+    try {
+      picked.color = getAQIColor(buildingAQI);
+    } catch (e) {
+      // Ignore setting if failed
+    }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-return {
+  return {
     handler,
     clearSelection() {
+      // Iterate over tracked buildings to restore colors
       selectedBuildings.forEach((color, building) => {
-        building.color = color;
+        try {
+          // Robust check: Ensure building, content exist and are not destroyed
+          if (building && building.content && !building.content.isDestroyed()) {
+            // WRAP SETTER IN TRY/CATCH: This is the specific fix for Model3DTileContent error
+            try {
+              building.color = color;
+            } catch (innerErr) {
+              // If the specific model inside the content is invalid/unloaded
+            }
+          }
+        } catch (error) {
+          // If the tile is fully unloaded/destroyed, access throws immediately
+        }
       });
       selectedBuildings.clear();
     },
