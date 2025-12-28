@@ -544,3 +544,5 @@ app.post('/api/mint-credit', requireAuth, async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 EcoBlocks production server running on ${PORT}`));
+
+export default app;
