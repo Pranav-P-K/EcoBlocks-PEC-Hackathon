@@ -1,5 +1,4 @@
-import dotenv from 'dotenv';
-dotenv.config();
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -544,6 +543,11 @@ app.post('/api/mint-credit', requireAuth, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 EcoBlocks production server running on ${PORT}`));
 
-export default app;
+// Only start the server if running locally or not in a serverless environment
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`🚀 EcoBlocks running locally on ${PORT}`));
+}
+
+// Export the app for Vercel to use as a serverless function
+module.exports = app;
