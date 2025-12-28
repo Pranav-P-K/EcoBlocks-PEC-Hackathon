@@ -176,7 +176,7 @@ const App: React.FC = () => {
       });
 
       setSimulationResult(result);
-      setCredits((prev) => prev + result.credits);
+      setCredits(result.credits);
     } catch (error) {
       console.error("Simulation failed:", error);
     }
@@ -186,6 +186,7 @@ const App: React.FC = () => {
     <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
       <div ref={viewerRef} style={{ position: "absolute", inset: 0, zIndex: 0 }} />
 
+      {/* ANALYTICS OVERLAY */}
       {showAnalytics && simulationResult && aqi && (
         <AnalyticsView
           initialAQI={aqi}
@@ -197,11 +198,15 @@ const App: React.FC = () => {
           aiInsight={simulationResult.aiInsight}
           traffic={traffic || "Unknown"}
           buildingDensity={buildingDensity || "Unknown"}
-          predictionData={simulationResult.predictionData}
+          
+          // 1. FIX: Pass the entire result object
+          result={simulationResult} 
+          
           onClose={() => setShowAnalytics(false)}
         />
       )}
 
+      {/* MAIN UI LAYER */}
       <div style={{ position: "absolute", inset: 0, display: "flex", pointerEvents: "none", zIndex: 10 }}>
         <Sidebar
           onSearch={handleCitySearch}
@@ -210,7 +215,8 @@ const App: React.FC = () => {
             viewer.current.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, 2500), duration: 2 });
             setCoords({ lat, lon });
           }}
-          onSelectIntervention={setSelectedIntervention}
+          // 2. FIX: Type cast to solve mismatch
+          onSelectIntervention={(val: any) => setSelectedIntervention(val)}
           onSimulate={handleSimulate}
           selectedIntervention={selectedIntervention}
           selectedBlockCount={selectedBlockCount} // PASS COUNT TO SIDEBAR
@@ -220,6 +226,9 @@ const App: React.FC = () => {
           <Dashboard
             aqi={aqi}
             traffic={traffic}
+            areaType={areaType}
+            treeDensity={treeDensity}
+          
             buildingDensity={buildingDensity}
             intervention={selectedIntervention}
             result={simulationResult}

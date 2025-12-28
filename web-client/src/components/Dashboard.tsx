@@ -1,17 +1,29 @@
-import React from "react";
+import React, { useMemo } from "react";
 
 interface Props {
   aqi?: number | null;
   traffic?: string | null;
   buildingDensity?: string | null;
+  areaType?: string | null;
+  treeDensity?: string | null;
   intervention?: string | null;
   result?: {
     newAQI: number;
     reductionAmount: number;
     credits: number;
-    aiInsight: string;
     estimatedCost?: number;
-    densityMultiplier?: number;
+    // Structured Insight Object
+    aiInsight: string | {
+      headline: string;
+      content: string;
+      tech_specs: string;
+      recommendation: string;
+    };
+    estimatedDays: number;
+    dailyAQIHistory: number[];
+    trafficHistory: number[];
+    aqiForecast: number[];
+    trafficForecast: number[];
   };
   onViewAnalytics?: () => void;
 }
@@ -25,7 +37,7 @@ const getAQIColor = (aqi: number) => {
   return '#673AB7';
 };
 
-// Estimated total costs for a standard city block simulation
+// Estimated total costs (Fallback)
 const INTERVENTION_COSTS: Record<string, number> = {
   "Green Wall": 12000,
   "Algae Panel": 25000,
@@ -35,7 +47,6 @@ const INTERVENTION_COSTS: Record<string, number> = {
   "Cool Roof + Solar": 35000
 };
 
-// Cost rates per unit/area for user reference
 const INTERVENTION_RATES: Record<string, string> = {
   "Green Wall": "$40 / sq.ft",
   "Algae Panel": "$85 / sq.ft",
@@ -46,22 +57,30 @@ const INTERVENTION_RATES: Record<string, string> = {
 };
 
 export const Dashboard: React.FC<Props> = ({
-  aqi,
-  traffic,
-  buildingDensity,
-  intervention,
-  result,
-  onViewAnalytics
+  aqi, traffic, buildingDensity, areaType, treeDensity, intervention, result, onViewAnalytics
 }) => {
-  // If no data, don't render anything
+  
+  // 1. HOOKS MUST BE CALLED FIRST (Before any return statement)
+  const insightData = useMemo(() => {
+    if (!result?.aiInsight) return null;
+    if (typeof result.aiInsight === 'string') {
+      try { return JSON.parse(result.aiInsight); }
+      catch { return { headline: "Analysis Complete", content: result.aiInsight }; }
+    }
+    return result.aiInsight;
+  }, [result]);
+
+  // 2. NOW we can do the conditional return
   if (!aqi && !result) return null;
 
-  // Calculate total cost immediately if intervention is selected (even before result)
+  // 3. Cost Calculation
   const currentCost = result?.estimatedCost ?? (intervention ? INTERVENTION_COSTS[intervention] : 0) ?? 0;
   const currentRate = intervention ? INTERVENTION_RATES[intervention] : null;
 
   return (
     <div className="dashboard">
+      
+      {/* ─── STATE 1: PRE-SIMULATION (Context) ─── */}
       {!result && <h3>🌱 Urban Conditions</h3>}
 
       {aqi && !result && (
@@ -78,9 +97,18 @@ export const Dashboard: React.FC<Props> = ({
             <strong>{traffic}</strong>
           </div>
           <div className="stat-row">
-            <span>Density</span>
-            <strong>{buildingDensity || "Calculating..."}</strong>
+            <span>Type</span>
+            <strong style={{textTransform: 'capitalize'}}>{areaType || 'Unknown'}</strong>
           </div>
+          <div className="stat-row">
+            <span>Density</span>
+            <strong>{buildingDensity}</strong>
+          </div>
+          <div className="stat-row">
+            <span>Greenery</span>
+            <strong>{treeDensity}</strong>
+          </div>
+
           <div style={{
             height: '6px',
             background: `linear-gradient(90deg, #4CAF50, ${getAQIColor(aqi)})`,
@@ -90,12 +118,7 @@ export const Dashboard: React.FC<Props> = ({
 
           {/* Show Cost Rate Immediately when selected */}
           {intervention && (
-            <div style={{
-              marginTop: '12px',
-              padding: '8px',
-              background: 'rgba(255,255,255,0.5)',
-              borderRadius: '6px'
-            }}>
+            <div style={{ marginTop: '12px', padding: '8px', background: 'rgba(255,255,255,0.5)', borderRadius: '6px' }}>
               <div className="stat-row" style={{ marginBottom: 0 }}>
                 <span style={{ color: '#2e7d32' }}>Est. Rate</span>
                 <strong style={{ color: '#1b5e20' }}>{currentRate || 'N/A'}</strong>
@@ -105,13 +128,18 @@ export const Dashboard: React.FC<Props> = ({
         </div>
       )}
 
+      {/* ─── STATE 2: POST-SIMULATION (Summary Only) ─── */}
       {result && (
         <div className="simulation-results">
-          <h3 style={{ marginBottom: '10px' }}>🌍 Impact Summary</h3>
-          <div className="stat-row">
-            <span>Intervention</span>
-            <strong>{intervention}</strong>
+          
+          {/* AI Headline (From your data) */}
+          <h3 style={{ marginBottom: '5px', fontSize:'1rem', color:'#2E7D32' }}>
+            {insightData?.headline || "Impact Summary"}
+          </h3>
+          <div style={{ fontSize:'0.75rem', color:'#666', marginBottom:'10px' }}>
+             {intervention} Applied
           </div>
+
           <div className="stat-row">
             <span>New AQI</span>
             <strong style={{ color: getAQIColor(result.newAQI) }}>{result.newAQI}</strong>
@@ -120,8 +148,12 @@ export const Dashboard: React.FC<Props> = ({
             <span>CO₂ Reduced</span>
             <strong>{result.reductionAmount.toFixed(1)} tons</strong>
           </div>
+          <div className="stat-row">
+            <span>Time to Effect</span>
+            <strong>{result.estimatedDays} Days</strong>
+          </div>
 
-          {/* Updated Estimated Cost Display with Rate Context */}
+          {/* Cost Display */}
           <div className="stat-row" style={{ alignItems: 'flex-start' }}>
             <span>Est. Cost</span>
             <div style={{ textAlign: 'right' }}>
@@ -134,37 +166,16 @@ export const Dashboard: React.FC<Props> = ({
             </div>
           </div>
 
-          <blockquote style={{
-            fontSize: '0.8rem',
-            fontStyle: 'italic',
-            background: '#f1f8e9',
-            padding: '8px',
-            borderRadius: '6px',
-            marginTop: '8px',
-            borderLeft: '3px solid var(--primary)'
-          }}>
-            {result.aiInsight}
-          </blockquote>
-
+          {/* Call to Action -> Opens AnalyticsView */}
           <button
             onClick={onViewAnalytics}
             style={{
-              width: '100%',
-              padding: '10px',
-              marginTop: '12px',
-              background: '#263238',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '600',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px'
+              width: '100%', padding: '10px', marginTop: '12px',
+              background: '#263238', color: 'white', border: 'none', borderRadius: '8px',
+              cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
             }}
           >
-            <span>📊</span> View Analytics
+            <span>📊</span> View Detailed Report
           </button>
         </div>
       )}
