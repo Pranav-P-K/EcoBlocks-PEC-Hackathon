@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function App() {
   // CONFIG: Replace with your actual deployed URL or Local IP
   // e.g. 'http://192.168.1.5:5173' for local testing
-  const PRODUCT_URL = 'http://192.168.29.233:5173/'; 
+  const PRODUCT_URL = 'https://eco-blocks-pec-hackathon-ypr6.vercel.app'; 
 
   const [isLoading, setIsLoading] = useState(true);
 

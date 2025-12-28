@@ -25,7 +25,7 @@
 }
 
 body {
-  overflow: hidden;
+  overflow: auto;
   background: #f0f4f8;
   /* Fallback */
 }
